@@ -1,0 +1,51 @@
+# ── Core framework ────────────────────────────────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.7.0
+python-multipart>=0.0.9        # FastAPI file uploads (PDF)
+
+# ── LangChain + LangGraph ─────────────────────────────────────────────────────
+langchain>=0.2.0
+langchain-core>=0.2.0
+langchain-community>=0.2.0
+langchain-google-genai>=1.0.0
+langchain-groq>=0.1.0          # Groq fallback LLM
+langchain-text-splitters>=0.2.0
+langchain-huggingface>=0.0.3
+langchain-chroma>=0.1.0        # Updated Chroma (replaces deprecated langchain one)
+langgraph>=0.2.0
+
+# ── LLM providers ─────────────────────────────────────────────────────────────
+google-generativeai>=0.7.0
+groq>=0.9.0
+
+# ── Web search ────────────────────────────────────────────────────────────────
+tavily-python>=0.3.0
+duckduckgo-search>=6.0.0       # correct package name (not ddgs)
+
+# ── Web scraping ──────────────────────────────────────────────────────────────
+requests>=2.32.0
+beautifulsoup4>=4.12.0
+
+# ── Google APIs (Docs, Drive, Gmail) ──────────────────────────────────────────
+google-auth>=2.29.0
+google-auth-oauthlib>=1.2.0
+google-auth-httplib2>=0.2.0
+google-api-python-client>=2.127.0
+
+# ── RAG pipeline ──────────────────────────────────────────────────────────────
+chromadb>=0.5.0
+pypdf>=4.2.0
+sentence-transformers>=3.0.0
+
+# ── YouTube ───────────────────────────────────────────────────────────────────
+youtube-transcript-api>=0.6.2
+
+# ── Database ──────────────────────────────────────────────────────────────────
+aiosqlite>=0.20.0              # async SQLite for database.py
+
+# ── Scheduler ─────────────────────────────────────────────────────────────────
+apscheduler>=3.10.0
+ddgs
+# ── Environment ───────────────────────────────────────────────────────────────
+python-dotenv>=1.0.0

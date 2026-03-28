@@ -1,0 +1,11 @@
+.env
+token.json
+credentials.json
+*.db
+__pycache__/
+myenv/
+venv/
+uploads/
+temp/
+*.log
+*.pyc
