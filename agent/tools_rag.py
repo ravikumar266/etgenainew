@@ -77,11 +77,11 @@ def _build_embeddings():
             try:
                 from langchain_google_genai import GoogleGenerativeAIEmbeddings
                 emb = GoogleGenerativeAIEmbeddings(
-                    model="models/text-embedding-004",
+                    model="models/text-embedding-001",
                     google_api_key=api_key,
                 )
                 emb.embed_query("test")
-                logger.info("[RAG] Embeddings: Google text-embedding-004")
+                logger.info("[RAG] Embeddings: Google text-embedding-001")
                 return emb
             except Exception as e:
                 logger.warning(f"[RAG] Google embeddings failed ({e}) — trying HuggingFace")
