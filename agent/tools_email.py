@@ -1,28 +1,21 @@
 """
 agent/tools_email.py
 ─────────────────────
-Email tools — Resend API (SMTP nahi, Render pe kaam karta hai!)
+Email tools — Gmail API (primary) + Resend (fallback)
 
-Setup:
-  .env me ye add karo:
-    RESEND_API_KEY = re_xxxxxxxxxxxx   ← Resend dashboard se
-    EMAIL_USER     = you@gmail.com     ← Gmail read ke liye (OAuth)
-    EMAIL_FROM     = you@yourdomain.com ← Resend verified email/domain
+Priority:
+  1. Gmail API (OAuth) — tumhara Gmail account use karta hai, koi domain verify nahi chahiye
+  2. Resend API — agar Gmail fail ho toh fallback
 
-  Resend free tier: 3000 emails/month, 100/day — enough for personal use
-
-Tools:
-  check_updates    — Gmail unread emails padhna (OAuth, unchanged)
-  send_email       — Email bhejna via Resend API (SMTP nahi!)
-
-Private helpers:
-  _read_emails_raw()    — Gmail fetch
-  _filter_important()   — LLM triage
-  _send_email_direct()  — Resend API, no approval (scheduler use karta hai)
+Setup .env:
+  EMAIL_USER     = you@gmail.com      ← Gmail read + send ke liye
+  RESEND_API_KEY = re_xxxx            ← Optional fallback
+  EMAIL_FROM     = you@yourdomain.com ← Resend ke liye (optional)
 """
 
 import base64
 import os
+from email.mime.text import MIMEText
 
 import requests
 from langchain_core.tools import tool
@@ -30,23 +23,53 @@ from langchain_core.tools import tool
 from agent.config import gmail_service, llm, logger
 
 
-# ── Resend API helper ─────────────────────────────────────────────────────────
+# ── Gmail API send (Primary — koi domain verify nahi chahiye!) ─────────────────
+
+def _gmail_api_send(to: str, subject: str, body: str) -> dict:
+    """
+    Gmail API se email bhejo — OAuth use karta hai.
+    - SMTP nahi → Render pe kaam karta hai ✅
+    - Domain verify nahi chahiye ✅
+    - Kisi bhi Gmail/email pe bhej sakte ho ✅
+    """
+    try:
+        service = gmail_service()
+
+        msg            = MIMEText(body)
+        msg["to"]      = to
+        msg["subject"] = subject
+
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+
+        service.users().messages().send(
+            userId="me",
+            body={"raw": raw}
+        ).execute()
+
+        logger.info(f"[Email] Gmail API → {to} ✓")
+        return {"success": True, "message": f"Email sent to {to} via Gmail API"}
+
+    except Exception as e:
+        logger.warning(f"[Email] Gmail API failed: {e} — trying Resend")
+        return {"success": False, "message": str(e)}
+
+
+# ── Resend API send (Fallback) ────────────────────────────────────────────────
 
 def _resend_send(to: str, subject: str, body: str) -> dict:
     """
-    Resend API se email bhejo.
-    SMTP nahi — pure HTTPS — Render pe perfectly kaam karta hai!
-
-    Returns: { success: bool, message: str }
+    Resend API se email bhejo — SMTP nahi, pure HTTPS.
+    Domain verify karna padega Resend me.
+    Sirf fallback ke taur pe use hota hai.
     """
-    api_key  = os.getenv("RESEND_API_KEY", "")
+    api_key    = os.getenv("RESEND_API_KEY", "")
     from_email = os.getenv("EMAIL_FROM", os.getenv("EMAIL_USER", ""))
 
     if not api_key:
-        return {"success": False, "message": "RESEND_API_KEY not set in environment"}
+        return {"success": False, "message": "RESEND_API_KEY not set"}
 
     if not from_email:
-        return {"success": False, "message": "EMAIL_FROM not set in environment"}
+        return {"success": False, "message": "EMAIL_FROM not set"}
 
     try:
         response = requests.post(
@@ -64,29 +87,40 @@ def _resend_send(to: str, subject: str, body: str) -> dict:
             timeout=15,
         )
 
-        if response.status_code == 200 or response.status_code == 201:
+        if response.status_code in (200, 201):
             data = response.json()
-            logger.info(f"[Email] Resend success → {to} | id={data.get('id', '?')}")
-            return {"success": True, "message": f"Email sent to {to}", "id": data.get("id")}
-
+            logger.info(f"[Email] Resend → {to} ✓ id={data.get('id', '?')}")
+            return {"success": True, "message": f"Email sent to {to} via Resend"}
         else:
             error = response.json().get("message", response.text)
             logger.error(f"[Email] Resend failed: {response.status_code} — {error}")
-            return {"success": False, "message": f"Resend error {response.status_code}: {error}"}
+            return {"success": False, "message": f"Resend error: {error}"}
 
-    except requests.exceptions.Timeout:
-        return {"success": False, "message": "Resend API timeout — try again"}
     except Exception as e:
         return {"success": False, "message": f"Resend request failed: {str(e)}"}
+
+
+# ── Smart send — Gmail first, Resend fallback ─────────────────────────────────
+
+def _send_email_smart(to: str, subject: str, body: str) -> dict:
+    """
+    Pehle Gmail API try karo, fail hone pe Resend try karo.
+    """
+    # Step 1: Gmail API
+    result = _gmail_api_send(to, subject, body)
+    if result["success"]:
+        return result
+
+    # Step 2: Resend fallback
+    logger.info("[Email] Gmail failed — trying Resend fallback")
+    result = _resend_send(to, subject, body)
+    return result
 
 
 # ── Private helpers ───────────────────────────────────────────────────────────
 
 def _read_emails_raw() -> str:
-    """
-    Gmail se 5 latest unread messages fetch karo.
-    OAuth use karta hai — SMTP nahi.
-    """
+    """Gmail se 5 latest unread messages fetch karo."""
     try:
         service = gmail_service()
         results = service.users().messages().list(
@@ -102,9 +136,7 @@ def _read_emails_raw() -> str:
         email_data = []
         for msg in messages:
             detail = service.users().messages().get(
-                userId="me",
-                id=msg["id"],
-                format="full",
+                userId="me", id=msg["id"], format="full",
             ).execute()
 
             headers = detail.get("payload", {}).get("headers", [])
@@ -156,7 +188,7 @@ EMAILS:
 {emails_text}
 """
     try:
-        result = llm.invoke(prompt)
+        result  = llm.invoke(prompt)
         content = result.content
         if isinstance(content, list):
             return " ".join(
@@ -170,14 +202,12 @@ EMAILS:
 
 def _send_email_direct(to: str, subject: str, body: str) -> None:
     """
-    Resend API se email bhejo — NO human approval.
-    Sirf scheduler use karta hai (morning briefing, notifications).
-    Kabhi @tool mat banao isko.
+    Scheduler ke liye — no approval gate.
+    Gmail API first, Resend fallback.
     """
-    result = _resend_send(to, subject, body)
-
+    result = _send_email_smart(to, subject, body)
     if result["success"]:
-        logger.info(f"[Scheduler] Email sent to {to} via Resend ✓")
+        logger.info(f"[Scheduler] Email sent to {to} ✓")
     else:
         logger.error(f"[Scheduler] Email failed: {result['message']}")
 
@@ -203,15 +233,15 @@ def check_updates() -> str:
 @tool
 def send_email(to: str, subject: str, body: str) -> str:
     """
-    Send an email using Resend API.
-    Requires human approval before executing (handled by graph).
+    Send an email. Uses Gmail API (no domain needed) with Resend as fallback.
+    Requires human approval before executing.
 
     Args:
-      to      : recipient email address
+      to      : recipient email address (any email — gmail, yahoo, etc.)
       subject : email subject line
       body    : plain text email body
     """
-    result = _resend_send(to, subject, body)
+    result = _send_email_smart(to, subject, body)
 
     if result["success"]:
         logger.info(f"[Email] Sent to {to} | subject: '{subject}'")
